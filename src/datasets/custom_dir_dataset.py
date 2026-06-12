@@ -17,6 +17,7 @@ class CustomDirDataset(BaseDataset):
             stem = lensless_path.stem
             mask_matches = sorted(masks_dir.glob(f"{stem}.*"))
             entry = {
+                "id": stem,
                 "lensless": str(lensless_path),
                 "mask": str(mask_matches[0]),
             }
@@ -35,7 +36,12 @@ class CustomDirDataset(BaseDataset):
         psf = self._get_psf(data_dict["mask"])
 
         lensed, lensless, psf = get_dataset_object(lensed_object, lensless_object, psf)
-        instance_data = {"lensless": lensless, "lensed": lensed, "psf": psf}
+        instance_data = {
+            "id": data_dict["id"],
+            "lensless": lensless,
+            "lensed": lensed,
+            "psf": psf,
+        }
         return self.preprocess_data(instance_data)
 
     def _get_psf(self, mask_path):

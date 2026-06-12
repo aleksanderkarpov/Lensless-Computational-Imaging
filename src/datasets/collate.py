@@ -16,6 +16,9 @@ def collate_fn(dataset_items: list[dict]):
 
     result_batch = {}
 
+    if "id" in dataset_items[0]:
+        result_batch["id"] = [elem["id"] for elem in dataset_items]
+
     result_batch["lensless"] = torch.stack(
         [elem["lensless"] for elem in dataset_items]
     )

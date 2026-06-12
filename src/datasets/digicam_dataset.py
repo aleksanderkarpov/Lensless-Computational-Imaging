@@ -31,7 +31,12 @@ class DigiCamDataset(BaseDataset):
         item = self._index[ind]
         psf = self._get_psf(item["mask_label"])
         lensed, lensless, psf = get_dataset_object(item["lensed"], item["lensless"], psf)
-        instance_data = {"lensless": lensless, "lensed": lensed, "psf": psf}
+        instance_data = {
+            "id": str(ind),
+            "lensless": lensless,
+            "lensed": lensed,
+            "psf": psf,
+        }
         return self.preprocess_data(instance_data)
 
     def _get_psf(self, mask_label):
