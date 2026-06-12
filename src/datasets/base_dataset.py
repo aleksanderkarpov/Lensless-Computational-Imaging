@@ -2,6 +2,7 @@ import logging
 import random
 from typing import List
 
+import cv2
 import torch
 from torch.utils.data import Dataset
 
@@ -39,31 +40,7 @@ class BaseDataset(Dataset):
         self._index: List[dict] = index
 
         self.instance_transforms = instance_transforms
-
-    def __getitem__(self, ind):
-        """
-        Get element from the index, preprocess it, and combine it
-        into a dict.
-
-        Notice that the choice of key names is defined by the template user.
-        However, they should be consistent across dataset getitem, collate_fn,
-        loss_function forward method, and model forward method.
-
-        Args:
-            ind (int): index in the self.index list.
-        Returns:
-            instance_data (dict): dict, containing instance
-                (a single dataset element).
-        """
-        data_dict = self._index[ind]
-        data_path = data_dict["path"]
-        data_object = self.load_object(data_path)
-        data_label = data_dict["label"]
-
-        instance_data = {"data_object": data_object, "labels": data_label}
-        instance_data = self.preprocess_data(instance_data)
-
-        return instance_data
+        self.psf_cache = {}
 
     def __len__(self):
         """
@@ -82,6 +59,13 @@ class BaseDataset(Dataset):
         """
         data_object = torch.load(path)
         return data_object
+
+    @staticmethod
+    def _load_image(path):
+        image = cv2.imread(str(path), cv2.IMREAD_UNCHANGED)
+        if image.ndim == 3:
+            image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
+        return image
 
     def preprocess_data(self, instance_data):
         """
@@ -139,12 +123,11 @@ class BaseDataset(Dataset):
                 such as label and object path.
         """
         for entry in index:
-            assert "path" in entry, (
-                "Each dataset item should include field 'path'" " - path to audio file."
+            assert "lensless" in entry, (
+                "Each dataset item should include field 'lensless'."
             )
-            assert "label" in entry, (
-                "Each dataset item should include field 'label'"
-                " - object ground-truth label."
+            assert "mask" in entry, (
+                "Each dataset item should include field 'mask'."
             )
 
     @staticmethod

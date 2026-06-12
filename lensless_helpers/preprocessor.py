@@ -3,7 +3,6 @@ import warnings
 import numpy as np
 import cv2
 
-from lensless_helpers.psf import simulate_psf_from_mask
 from lensless_helpers.utils import resize
 
 
@@ -59,16 +58,17 @@ def get_roi(image):
     ]
 
 
-def get_dataset_object(lensed, lensless, mask_vals):
-    lensed = convert_image_to_float(force_rgb(np.array(lensed)))
+def get_dataset_object(lensed, lensless, psf):
+    if lensed is not None:
+        lensed = convert_image_to_float(force_rgb(np.array(lensed)))
     lensless = convert_image_to_float(force_rgb(np.array(lensless)))
 
     # lensless image is upside-down
     lensless = torch.rot90(torch.from_numpy(lensless), dims=(-3, -2), k=2)
 
-    lensed = get_cropped_lensed(lensed, lensless)
-    lensed = torch.from_numpy(lensed)
+    if lensed is not None:
+        lensed = get_cropped_lensed(lensed, lensless)
+        lensed = torch.from_numpy(lensed)
 
-    psf = simulate_psf_from_mask(mask_vals)
     return lensed, lensless, psf
     
