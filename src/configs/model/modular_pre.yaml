@@ -1,0 +1,3 @@
+_target_: src.model.ModularPre
+iters: 5
+channels: [32, 64, 128, 256]
