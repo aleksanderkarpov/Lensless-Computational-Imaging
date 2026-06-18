@@ -14,7 +14,7 @@ from src.utils.io_utils import ROOT_PATH
 warnings.filterwarnings("ignore", category=UserWarning)
 
 
-@hydra.main(version_base=None, config_path="src/configs", config_name="admm")
+@hydra.main(version_base=None, config_path="src/configs", config_name="inference")
 def main(config):
     """
     Main script for inference. Instantiates the model, metrics, and
@@ -42,8 +42,10 @@ def main(config):
     # get metrics
     metrics = instantiate(config.metrics)
 
-    project_config = OmegaConf.to_container(config)
-    writer = instantiate(config.writer, logging.getLogger("inference"), project_config)
+    writer = None
+    if config.inferencer.get("log_to_writer", False):
+        project_config = OmegaConf.to_container(config)
+        writer = instantiate(config.writer, logging.getLogger("inference"), project_config)
 
     # save_path for model predictions
     save_path = ROOT_PATH / "data" / "saved" / config.inferencer.save_path
