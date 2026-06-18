@@ -1,0 +1,4 @@
+test:
+  _target_: src.datasets.DigiCamDataset
+  dataset_name: bezzam/DigiCam-Mirflickr-MultiMask-10K
+  split: test
