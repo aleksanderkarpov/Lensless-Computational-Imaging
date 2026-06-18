@@ -1,3 +1,5 @@
+import cv2
+import numpy as np
 import torch
 from tqdm.auto import tqdm
 
@@ -24,6 +26,7 @@ class Inferencer(BaseTrainer):
         metrics=None,
         batch_transforms=None,
         skip_model_load=False,
+        writer=None,
     ):
         """
         Initialize the Inferencer.
@@ -53,11 +56,13 @@ class Inferencer(BaseTrainer):
 
         self.config = config
         self.cfg_trainer = self.config.inferencer
+        self.normalize = config.get("normalize", True)
 
         self.device = device
 
         self.model = model
         self.batch_transforms = batch_transforms
+        self.writer = writer
 
         # define dataloaders
         self.evaluation_dataloaders = {k: v for k, v in dataloaders.items()}
@@ -122,35 +127,28 @@ class Inferencer(BaseTrainer):
         outputs = self.model(**batch)
         batch.update(outputs)
 
-        if metrics is not None:
+        if metrics is not None and "lensed" in batch:
             for met in self.metrics["inference"]:
                 metrics.update(met.name, met(**batch))
 
-        # Some saving logic. This is an example
-        # Use if you need to save predictions on disk
+        reconstructed = batch["reconstructed"]
+        ids = batch.get("id")
 
-        batch_size = batch["logits"].shape[0]
-        current_id = batch_idx * batch_size
-
-        for i in range(batch_size):
-            # clone because of
-            # https://github.com/pytorch/pytorch/issues/1995
-            logits = batch["logits"][i].clone()
-            label = batch["labels"][i].clone()
-            pred_label = logits.argmax(dim=-1)
-
-            output_id = current_id + i
-
-            output = {
-                "pred_label": pred_label,
-                "label": label,
-            }
-
+        for i in range(reconstructed.shape[0]):
+            name = ids[i] if ids is not None else f"{batch_idx}_{i}"
             if self.save_path is not None:
-                # you can use safetensors or other lib here
-                torch.save(output, self.save_path / part / f"output_{output_id}.pth")
+                self._save_image(reconstructed[i], self.save_path / part / f"{name}.png")
+
+        if self.writer is not None:
+            self.writer.set_step(batch_idx, part)
+            self._log_reconstruction(batch)
 
         return batch
+
+    def _save_image(self, image, path):
+        image = (self._norm(image).numpy() * 255).astype(np.uint8)
+        image = cv2.cvtColor(image, cv2.COLOR_RGB2BGR)
+        cv2.imwrite(str(path), image)
 
     def _inference_part(self, part, dataloader):
         """
@@ -185,4 +183,11 @@ class Inferencer(BaseTrainer):
                     metrics=self.evaluation_metrics,
                 )
 
-        return self.evaluation_metrics.result()
+        logs = self.evaluation_metrics.result()
+
+        if self.writer is not None:
+            self.writer.set_step(0, part)
+            for name, value in logs.items():
+                self.writer.add_scalar(name, value)
+
+        return logs

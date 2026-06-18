@@ -1,13 +1,18 @@
 from abc import abstractmethod
 
+import numpy as np
 import torch
 from numpy import inf
 from torch.nn.utils import clip_grad_norm_
 from tqdm.auto import tqdm
 
+from lensless_helpers.preprocessor import ALIGNMENT
 from src.datasets.data_utils import inf_loop
 from src.metrics.tracker import MetricTracker
 from src.utils.io_utils import ROOT_PATH
+
+TOP, LEFT = ALIGNMENT["top_left"]
+HEIGHT, WIDTH = ALIGNMENT["height"], ALIGNMENT["width"]
 
 
 class BaseTrainer:
@@ -21,7 +26,6 @@ class BaseTrainer:
         criterion,
         metrics,
         optimizer,
-        lr_scheduler,
         config,
         device,
         dataloaders,
@@ -39,8 +43,6 @@ class BaseTrainer:
                 (metrics[train]) and inference (metrics[inference]). Each
                 metric is an instance of src.metrics.BaseMetric.
             optimizer (Optimizer): optimizer for the model.
-            lr_scheduler (LRScheduler): learning rate scheduler for the
-                optimizer.
             config (DictConfig): experiment config containing training config.
             device (str): device for tensors and model.
             dataloaders (dict[DataLoader]): dataloaders for different
@@ -59,6 +61,7 @@ class BaseTrainer:
 
         self.config = config
         self.cfg_trainer = self.config.trainer
+        self.normalize = config.get("normalize", True)
 
         self.device = device
         self.skip_oom = skip_oom
@@ -69,7 +72,6 @@ class BaseTrainer:
         self.model = model
         self.criterion = criterion
         self.optimizer = optimizer
-        self.lr_scheduler = lr_scheduler
         self.batch_transforms = batch_transforms
 
         # define dataloaders
@@ -228,9 +230,6 @@ class BaseTrainer:
                         epoch, self._progress(batch_idx), batch["loss"].item()
                     )
                 )
-                self.writer.add_scalar(
-                    "learning rate", self.lr_scheduler.get_last_lr()[0]
-                )
                 self._log_scalars(self.train_metrics)
                 self._log_batch(batch_idx, batch)
                 # we don't want to reset train metrics at the start of every epoch
@@ -345,7 +344,8 @@ class BaseTrainer:
                 the dataloader with some of the tensors on the device.
         """
         for tensor_for_device in self.cfg_trainer.device_tensors:
-            batch[tensor_for_device] = batch[tensor_for_device].to(self.device)
+            if tensor_for_device in batch:
+                batch[tensor_for_device] = batch[tensor_for_device].to(self.device)
         return batch
 
     def transform_batch(self, batch):
@@ -422,6 +422,32 @@ class BaseTrainer:
             total = self.epoch_len
         return base.format(current, total, 100.0 * current / total)
 
+    def _norm(self, image):
+        image = image.detach().cpu()
+        if self.normalize:
+            lo, hi = image.amin(), image.amax()
+            return (image - lo) / (hi - lo + 1e-8)
+        return image.clamp(0, 1)
+
+    @staticmethod
+    def _roi(image):
+        return image[TOP:TOP + HEIGHT, LEFT:LEFT + WIDTH, :]
+
+    def _grid(self, tensors):
+        grid = torch.cat([self._norm(t) for t in tensors], dim=1)
+        return (grid.numpy() * 255).astype(np.uint8)
+
+    def _log_reconstruction(self, batch):
+        full = [batch["lensless"][0]]
+        roi = []
+        if batch.get("lensed") is not None:
+            full.append(batch["lensed"][0])
+            roi.append(self._roi(batch["lensed"][0]))
+        full.append(batch["reconstructed"][0])
+        roi.append(self._roi(batch["reconstructed"][0]))
+        self.writer.add_image("reconstruction", self._grid(full))
+        self.writer.add_image("reconstruction_roi", self._grid(roi))
+
     @abstractmethod
     def _log_batch(self, batch_idx, batch, mode="train"):
         """
@@ -468,7 +494,6 @@ class BaseTrainer:
             "epoch": epoch,
             "state_dict": self.model.state_dict(),
             "optimizer": self.optimizer.state_dict(),
-            "lr_scheduler": self.lr_scheduler.state_dict(),
             "monitor_best": self.mnt_best,
             "config": self.config,
         }
@@ -514,16 +539,14 @@ class BaseTrainer:
         # load optimizer state from checkpoint only when optimizer type is not changed.
         if (
             checkpoint["config"]["optimizer"] != self.config["optimizer"]
-            or checkpoint["config"]["lr_scheduler"] != self.config["lr_scheduler"]
         ):
             self.logger.warning(
-                "Warning: Optimizer or lr_scheduler given in the config file is different "
-                "from that of the checkpoint. Optimizer and scheduler parameters "
+                "Warning: Optimizer given in the config file is different "
+                "from that of the checkpoint. Optimizer parameters "
                 "are not resumed."
             )
         else:
             self.optimizer.load_state_dict(checkpoint["optimizer"])
-            self.lr_scheduler.load_state_dict(checkpoint["lr_scheduler"])
 
         self.logger.info(
             f"Checkpoint loaded. Resume training from epoch {self.start_epoch}"
