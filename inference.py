@@ -1,8 +1,10 @@
+import logging
 import warnings
 
 import hydra
 import torch
 from hydra.utils import instantiate
+from omegaconf import OmegaConf
 
 from src.datasets.data_utils import get_dataloaders
 from src.trainer import Inferencer
@@ -12,7 +14,7 @@ from src.utils.io_utils import ROOT_PATH
 warnings.filterwarnings("ignore", category=UserWarning)
 
 
-@hydra.main(version_base=None, config_path="src/configs", config_name="inference")
+@hydra.main(version_base=None, config_path="src/configs", config_name="admm")
 def main(config):
     """
     Main script for inference. Instantiates the model, metrics, and
@@ -40,9 +42,14 @@ def main(config):
     # get metrics
     metrics = instantiate(config.metrics)
 
+    project_config = OmegaConf.to_container(config)
+    writer = instantiate(config.writer, logging.getLogger("inference"), project_config)
+
     # save_path for model predictions
     save_path = ROOT_PATH / "data" / "saved" / config.inferencer.save_path
     save_path.mkdir(exist_ok=True, parents=True)
+
+    skip_model_load = config.inferencer.get("from_pretrained") is None
 
     inferencer = Inferencer(
         model=model,
@@ -52,7 +59,8 @@ def main(config):
         batch_transforms=batch_transforms,
         save_path=save_path,
         metrics=metrics,
-        skip_model_load=False,
+        skip_model_load=skip_model_load,
+        writer=writer,
     )
 
     logs = inferencer.run_inference()
