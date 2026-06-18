@@ -1,0 +1,3 @@
+_target_: src.model.LeADMM
+iters: 100
+trainable: false
